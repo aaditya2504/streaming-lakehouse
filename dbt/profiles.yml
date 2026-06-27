@@ -1,0 +1,12 @@
+lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      host: localhost
+      port: 8081
+      user: analyst
+      catalog: lake
+      schema: silver
+      threads: 1
+      http_scheme: http

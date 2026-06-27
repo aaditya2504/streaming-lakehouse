@@ -1,0 +1,17 @@
+{
+  "name": "banking-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "bank",
+    "database.password": "bankpw",
+    "database.dbname": "banking",
+    "topic.prefix": "banking",
+    "table.include.list": "public.accounts,public.transactions",
+    "plugin.name": "pgoutput",
+    "slot.name": "dbz_slot",
+    "publication.autocreate.mode": "all_tables",
+    "decimal.handling.mode": "double"
+  }
+}

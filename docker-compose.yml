@@ -1,0 +1,111 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: bank
+      POSTGRES_PASSWORD: bankpw
+      POSTGRES_DB: banking
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=4"
+      - "-c"
+      - "max_wal_senders=4"
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+
+  kafka:
+    image: quay.io/debezium/kafka:3.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      CLUSTER_ID: "5Yr1SIgYQz-b-dgRabWx4g"
+      NODE_ID: "1"
+      NODE_ROLE: "combined"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "INTERNAL://kafka:19092,EXTERNAL://0.0.0.0:9092,CONTROLLER://kafka:9093"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:19092,EXTERNAL://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+  connect:
+    image: quay.io/debezium/connect:3.0
+    container_name: connect
+    depends_on: [kafka, postgres]
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: "kafka:19092"
+      GROUP_ID: "1"
+      CONFIG_STORAGE_TOPIC: "connect_configs"
+      OFFSET_STORAGE_TOPIC: "connect_offsets"
+      STATUS_STORAGE_TOPIC: "connect_statuses"
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on: [kafka]
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:19092"
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: "http://connect:8083"
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./data/minio:/data
+
+  mc:
+    image: minio/mc:latest
+    container_name: mc
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin) do sleep 2; done;
+      /usr/bin/mc mb -p local/lakehouse;
+      tail -f /dev/null
+      "
+
+  iceberg-rest:
+    image: tabulario/iceberg-rest:1.6.0
+    container_name: iceberg-rest
+    depends_on: [minio]
+    ports:
+      - "8181:8181"
+    environment:
+      CATALOG_WAREHOUSE: "s3://lakehouse/warehouse"
+      CATALOG_IO__IMPL: "org.apache.iceberg.aws.s3.S3FileIO"
+      CATALOG_S3_ENDPOINT: "http://minio:9000"
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: "minioadmin"
+      AWS_SECRET_ACCESS_KEY: "minioadmin"
+      AWS_REGION: "us-east-1"
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: trino
+    depends_on: [minio, iceberg-rest]
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./trino/catalog:/etc/trino/catalog

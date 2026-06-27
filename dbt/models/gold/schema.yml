@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: account_summary
+    description: >
+      Gold-layer portfolio summary. One row per account status, aggregating
+      the current-state silver model (accounts_current) into total balance,
+      account count, and balance statistics. Accounts with a NULL balance are
+      excluded as non-meaningful.
+    columns:
+      - name: status
+        description: Account status (active or frozen).
+        tests:
+          - not_null
+          - unique
+          - accepted_values:
+              values: ['active', 'frozen']
+      - name: account_count
+        description: Number of accounts in this status with a captured balance.
+        tests:
+          - not_null
+      - name: total_balance
+        description: Sum of balances across all accounts in this status.
+        tests:
+          - not_null
+      - name: avg_balance
+        description: Mean balance across accounts in this status.
+      - name: min_balance
+        description: Smallest balance in this status.
+      - name: max_balance
+        description: Largest balance in this status.

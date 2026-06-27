@@ -1,0 +1,10 @@
+version: 2
+models:
+  - name: accounts_current
+    columns:
+      - name: account_id
+        tests: [not_null, unique]
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['active','frozen']

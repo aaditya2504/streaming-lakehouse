@@ -1,0 +1,12 @@
+name: lakehouse
+profile: lakehouse
+version: "1.0"
+model-paths: ["models"]
+models:
+  lakehouse:
+    silver:
+      +materialized: table
+      +schema: silver
+    gold:
+      +materialized: table
+      +schema: gold
