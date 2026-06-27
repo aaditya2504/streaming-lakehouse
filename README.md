@@ -4,9 +4,27 @@ A real-time data lakehouse that captures row-level changes from a transactional 
 
 This is the modern, log-based-CDC replacement for nightly batch ETL: instead of polling tables on a schedule, it streams every insert, update, and delete off the Postgres write-ahead log the moment it commits.
 
+> Author: Aaditya Kumar Singh
+
 ## Architecture
-Postgres (WAL) ─► Debezium ─► Kafka ─► Spark Structured Streaming ─► Iceberg (MinIO) ─► Trino ─► dbt
- source CDC log micro-batch ingest bronze/silver/gold query transforms + tests
+
+```mermaid
+flowchart TD
+    PG[("Postgres<br/>WAL, logical")] --> DBZ["Debezium<br/>log-based CDC"]
+    DBZ --> KAFKA["Kafka<br/>event log"]
+    KAFKA --> SPARK["Spark Structured Streaming<br/>micro-batch ingest"]
+
+    subgraph ICEBERG["Apache Iceberg on MinIO — medallion"]
+        direction LR
+        BRONZE["Bronze<br/>raw CDC, immutable"] --> SILVER["Silver<br/>current state, PII masked"]
+        SILVER --> GOLD["Gold<br/>business summary"]
+    end
+
+    SPARK --> BRONZE
+    DBT["dbt<br/>transforms, tests, lineage"] -.builds.-> SILVER
+    DBT -.builds.-> GOLD
+    ICEBERG --> TRINO["Trino<br/>SQL query engine"]
+```
 
 | Stage | Technology | Role |
 |-------|-----------|------|
@@ -26,28 +44,31 @@ Postgres (WAL) ─► Debezium ─► Kafka ─► Spark Structured Streaming �
 - **Gold** (`lake.gold.account_summary`) — business-facing portfolio rollup: total/avg/min/max balance and account count per status.
 
 ## Repository layout
+
+```
 streaming-lakehouse/
- ├── docker-compose.yml # all services
- ├── source/ # Postgres schema + transaction generator
- │ ├── schema.sql
- │ └── txn_generator.py
- ├── debezium/
- │ └── accounts-connector.json # Debezium connector config
- ├── streaming/
- │ └── cdc_to_bronze.py # Spark Structured Streaming job (CDC → bronze)
- ├── trino/
- │ └── catalog/lake.properties # Trino Iceberg REST catalog config
- ├── maintenance/
- │ └── maintain.py # Iceberg table maintenance (compaction, etc.)
- ├── dbt/
- │ ├── dbt_project.yml
- │ ├── profiles.yml
- │ ├── macros/
- │ │ └── generate_schema_name.sql # clean per-layer schema names
- │ └── models/
- │ ├── silver/accounts_current.sql + schema.yml
- │ └── gold/account_summary.sql + schema.yml
- └── data/ # local Postgres + MinIO volumes (gitignored)
+├── docker-compose.yml          # all services
+├── source/                     # Postgres schema + transaction generator
+│   ├── schema.sql
+│   └── txn_generator.py
+├── debezium/
+│   └── accounts-connector.json # Debezium connector config
+├── streaming/
+│   └── cdc_to_bronze.py        # Spark Structured Streaming job (CDC → bronze)
+├── trino/
+│   └── catalog/lake.properties # Trino Iceberg REST catalog config
+├── maintenance/
+│   └── maintain.py             # Iceberg table maintenance (compaction, etc.)
+├── dbt/
+│   ├── dbt_project.yml
+│   ├── profiles.yml
+│   ├── macros/
+│   │   └── generate_schema_name.sql   # clean per-layer schema names
+│   └── models/
+│       ├── silver/accounts_current.sql + schema.yml
+│       └── gold/account_summary.sql + schema.yml
+└── data/                       # local Postgres + MinIO volumes (gitignored)
+```
 
 ## Running the pipeline
 
@@ -113,12 +134,27 @@ SELECT * FROM lake.gold.account_summary;
 ```
 
 Sample output:
-status | account_count | total_balance | avg_balance | min_balance | max_balance
- --------+---------------+---------------+-------------+-------------+-------------
- frozen | 47 | 111081.34 | 2363.43 | -2189.36 | 6362.08
- active | 4 | 6733.66 | 1683.42 | -485.89 | 3683.53
 
-### 7. Table maintenance
+```
+ status | account_count | total_balance | avg_balance | min_balance | max_balance
+--------+---------------+---------------+-------------+-------------+-------------
+ frozen |            47 |     111081.34 |     2363.43 |    -2189.36 |     6362.08
+ active |             4 |       6733.66 |     1683.42 |     -485.89 |     3683.53
+```
+
+### 7. Time-travel demo (point-in-time auditability)
+
+Iceberg keeps a snapshot per commit, so you can query the table as it existed at any past snapshot:
+
+```sql
+-- list snapshots
+SELECT committed_at, snapshot_id FROM lake.bronze."accounts$snapshots" ORDER BY committed_at;
+
+-- query the table as of an earlier snapshot (paste a real snapshot_id)
+SELECT count(*) FROM lake.bronze.accounts FOR VERSION AS OF <snapshot_id>;
+```
+
+### 8. Table maintenance
 
 ```bash
 export AWS_REGION=us-east-1
